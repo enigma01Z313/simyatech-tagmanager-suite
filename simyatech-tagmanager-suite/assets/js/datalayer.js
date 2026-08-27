@@ -148,8 +148,11 @@
     // ------------------------------------------------------------ dataLayer
 
     function push(payload) {
-        console.log('%c ------------', 'color: red; font-size: 40px');
-        console.log(payload);
+        const url = window.location.href;
+        if (url.includes("staging")) {
+            console.log('%c ------------', 'color: red; font-size: 40px');
+            console.log(payload);
+        }
         
         window.dataLayer.push(payload);
 
