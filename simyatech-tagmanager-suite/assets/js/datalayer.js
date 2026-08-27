@@ -148,6 +148,9 @@
     // ------------------------------------------------------------ dataLayer
 
     function push(payload) {
+        console.log('%c ------------', 'color: red; font-size: 40px');
+        console.log(payload);
+        
         window.dataLayer.push(payload);
 
         if (cfg.debug && window.console && window.console.log) {
