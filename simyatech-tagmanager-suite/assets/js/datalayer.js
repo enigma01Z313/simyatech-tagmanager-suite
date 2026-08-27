@@ -334,19 +334,42 @@
         }
     });
 
+    /**
+     * Bookly sends every step but payment as a GET, and jQuery moves the
+     * payload of a GET into the query string and then deletes settings.data.
+     * So the action has to be read from the URL too, not only from the body --
+     * otherwise the payment step is the only one ever seen.
+     */
     function requestParams(settings) {
-        var data = settings && settings.data,
-            params = {};
+        var params = {},
+            url = String((settings && settings.url) || ''),
+            data = settings && settings.data,
+            mark = url.indexOf('?');
 
-        if (!data) {
-            return params;
+        if (mark !== -1) {
+            parseQuery(url.slice(mark + 1), params);
         }
 
-        if (typeof data === 'object') {
-            return data;
+        if (typeof data === 'string') {
+            parseQuery(data, params);
+        } else if (data && typeof data === 'object') {
+            if (typeof data.forEach === 'function' && typeof data.append === 'function') {
+                // FormData
+                data.forEach(function (value, key) {
+                    params[key] = value;
+                });
+            } else {
+                $.each(data, function (key, value) {
+                    params[key] = value;
+                });
+            }
         }
 
-        String(data).split('&').forEach(function (pair) {
+        return params;
+    }
+
+    function parseQuery(query, params) {
+        String(query).split('&').forEach(function (pair) {
             if (!pair) {
                 return;
             }
@@ -356,8 +379,6 @@
 
             params[decodeParam(key)] = decodeParam(value);
         });
-
-        return params;
     }
 
     function decodeParam(value) {
