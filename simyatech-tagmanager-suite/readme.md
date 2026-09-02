@@ -55,6 +55,24 @@ Note: a payment gateway that redirects off-site (PayPal Standard) brings the
 visitor back on a **new page load**, so the completion event of such a booking
 carries a new `flow_id`.
 
+## client_id / user_id
+
+Every push carries the Bookly customer id as `client_id`, from the moment the
+visitor is known:
+
+* **Logged in** — the customer linked to the WordPress account is resolved on
+  the server, so `client_id` rides on the very first push of the page. The same
+  value is also sent as `user_id`.
+* **Guest** — nobody is identifiable until the details step has put an email /
+  phone into the Bookly session, so the id is looked up from that step on and
+  then joins every later push. Only `client_id` is sent: a guest has no account,
+  so there is no `user_id`.
+
+A guest booking for the first time has no Bookly customer record at all until
+Bookly saves the booking, so their `client_id` appears with
+`bookly_booking_completed` and not before. Pushes made while the visitor is
+still unknown simply carry neither field.
+
 ## Events
 
 ### 1. `bookly_step_view` — every time a step renders
@@ -72,6 +90,12 @@ Steps and their indexes: `init` 0, `time` 1, `cart` 2, `details` 3,
 `payment` 4, `done` 5. Bookly's *extras* and *repeat* steps are not tracked.
 When Bookly skips the payment step (nothing payable), no payment step view is
 pushed.
+
+`init` marks the form booting rather than the service step in particular: on a
+therapist page the staff is pre-selected, so Bookly skips the service step and
+boots straight into the time step. Whichever step Bookly renders first counts
+as the boot, so `init` is pushed once per page view on every page carrying the
+form — immediately before that first real step view.
 
 ### 2. `booking_start` — first time slot click of the flow
 
@@ -147,6 +171,7 @@ Read back from the saved order:
 | field | source |
 | --- | --- |
 | `booking_id` | id of the first customer appointment in the order |
+| `client_id` | Bookly customer the order belongs to (also fills in the id for a first-time guest) |
 | `status` | its Bookly status (`approved`, `pending`, …) |
 | `payment_status` | payment status (`completed`, `pending`, …) |
 | `order_id` | `created_at` of the booking + `|` + customer email |
@@ -177,8 +202,13 @@ Fires once per flow.
 * **Completed booking** — `wp_ajax_stms_order_data` resolves the order from the
   caller's Bookly session, falling back to the order token Bookly returns with
   the complete step, then reads the appointments and the payment.
+* **Visitor identity** — a logged-in visitor's customer id comes straight from
+  the localized JS config. For a guest, `wp_ajax_stms_customer` looks the
+  customer up from the caller's own Bookly session (`form_id`) once the details
+  step has run; it only ever reads, since Bookly creates the customer record
+  itself at save time.
 
-Both endpoints only return data the caller already owns: the Bookly form id is
+Every endpoint only returns data the caller already owns: the Bookly form id is
 the caller's own session token, and the order token is the unguessable token
 Bookly itself hands to the browser.
 

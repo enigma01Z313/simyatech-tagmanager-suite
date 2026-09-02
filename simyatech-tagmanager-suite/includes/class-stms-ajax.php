@@ -18,6 +18,24 @@ class STMS_Ajax
         add_action( 'wp_ajax_nopriv_stms_flow_state', array( __CLASS__, 'flow_state' ) );
         add_action( 'wp_ajax_stms_order_data', array( __CLASS__, 'order_data' ) );
         add_action( 'wp_ajax_nopriv_stms_order_data', array( __CLASS__, 'order_data' ) );
+        add_action( 'wp_ajax_stms_customer', array( __CLASS__, 'customer' ) );
+        add_action( 'wp_ajax_nopriv_stms_customer', array( __CLASS__, 'customer' ) );
+    }
+
+    /**
+     * Who the visitor is, as far as Bookly can tell: the caller only ever gets
+     * back the customer of its own session, or its own logged-in account.
+     */
+    public static function customer()
+    {
+        self::check_nonce();
+
+        $client_id = STMS_Bookly_Data::customer_id( self::param( 'form_id' ) );
+
+        wp_send_json_success( array(
+            'client_id' => $client_id ? $client_id : '',
+            'logged_in' => is_user_logged_in(),
+        ) );
     }
 
     /**

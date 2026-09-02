@@ -145,9 +145,67 @@
         return 'other';
     }
 
+    // ------------------------------------------------------------- identity
+
+    /**
+     * The Bookly customer behind this flow. A logged-in visitor is known from
+     * the very first push; a guest only becomes identifiable once the details
+     * step has handed Bookly an email / phone, so the id is looked up from
+     * that step on and then rides along on every later push.
+     */
+    var identity = {
+        clientId: String(cfg.customerId || ''),
+        loggedIn: !!cfg.loggedIn
+    };
+
+    var customerLookup = null;
+
+    function resolveCustomer(formId) {
+        if (identity.clientId !== '' || customerLookup) {
+            return;
+        }
+
+        customerLookup = $.post(cfg.ajaxurl, {
+            action: 'stms_customer',
+            nonce: cfg.nonce,
+            form_id: formId || ''
+        }).done(function (response) {
+            var data = response && response.success ? response.data : null;
+
+            if (data) {
+                identity.clientId = data.client_id ? String(data.client_id) : '';
+                identity.loggedIn = !!data.logged_in;
+            }
+            // Nobody matched yet -- let a later step try again.
+            if (identity.clientId === '') {
+                customerLookup = null;
+            }
+        }).fail(function () {
+            customerLookup = null;
+        });
+    }
+
+    /**
+     * client_id is the Bookly customer id. For a logged-in visitor it doubles
+     * as user_id; a guest has no account, so only client_id is sent.
+     */
+    function withIdentity(payload) {
+        if (identity.clientId !== '') {
+            payload.client_id = identity.clientId;
+
+            if (identity.loggedIn) {
+                payload.user_id = identity.clientId;
+            }
+        }
+
+        return payload;
+    }
+
     // ------------------------------------------------------------ dataLayer
 
     function push(payload) {
+        withIdentity(payload);
+
         const url = window.location.href;
         if (url.includes("staging")) {
             console.log('%c ------------', 'color: red; font-size: 40px');
@@ -161,11 +219,22 @@
         }
     }
 
+    var initSent = false;
+
     function pushStepView(step) {
         var index = STEPS.indexOf(step);
 
         if (index === -1) {
             return;
+        }
+
+        // The form boots once per page view, so init is reported once even
+        // when more than one signal sees that boot.
+        if (step === 'init') {
+            if (initSent) {
+                return;
+            }
+            initSent = true;
         }
 
         push({
@@ -244,6 +313,12 @@
 
             var data = response.data;
 
+            // The saved order names its customer, so this event and every push
+            // after it carry the id even when nothing resolved it earlier.
+            if (data.client_id) {
+                identity.clientId = String(data.client_id);
+            }
+
             push({
                 flow_id: flowId,
                 event: 'bookly_booking_completed',
@@ -312,6 +387,15 @@
             response = xhr.responseJSON,
             step = STEP_BY_ACTION[action];
 
+        /**
+         * A therapist page pre-selects the staff, so Bookly skips the service
+         * step and bookly_render_service never fires there. Whichever step it
+         * renders first is the moment the form is up, and that is the init.
+         */
+        if (action.indexOf('bookly_render_') === 0 && response && response.success !== false) {
+            pushStepView('init');
+        }
+
         if (step) {
             if (!response || response.success === false) {
                 return;
@@ -322,6 +406,11 @@
             }
 
             pushStepView(step);
+
+            // From the details step on, Bookly knows who a guest is.
+            if (step === 'details' || step === 'payment' || step === 'done') {
+                resolveCustomer(formId);
+            }
 
             if (step === 'payment') {
                 refreshState(formId);

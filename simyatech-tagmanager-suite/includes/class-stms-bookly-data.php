@@ -19,6 +19,61 @@ class STMS_Bookly_Data
     }
 
     /**
+     * Bookly customer of the logged-in visitor, if that visitor has one.
+     *
+     * @return int 0 when nobody is logged in or no customer is linked
+     */
+    public static function logged_in_customer_id()
+    {
+        if ( ! is_user_logged_in() || ! class_exists( '\Bookly\Lib\Entities\Customer' ) ) {
+            return 0;
+        }
+
+        try {
+            return (int) \Bookly\Lib\Entities\Customer::query()
+                ->where( 'wp_user_id', get_current_user_id() )
+                ->fetchVar( 'id' );
+        } catch ( \Exception $e ) {
+            return 0;
+        }
+    }
+
+    /**
+     * Bookly customer behind a booking in progress.
+     *
+     * A logged-in visitor is known straight away. A guest is only identifiable
+     * once the details step has put an email / phone into the session, and
+     * only when that matches a customer Bookly already stores - Bookly itself
+     * creates the record at save time, so before that there is nothing to
+     * report.
+     *
+     * @param string $form_id Bookly form token
+     * @return int 0 when the visitor cannot be identified yet
+     */
+    public static function customer_id( $form_id )
+    {
+        $customer_id = self::logged_in_customer_id();
+
+        if ( $customer_id || ! self::is_available() || $form_id === '' ) {
+            return $customer_id;
+        }
+
+        try {
+            $user_data = new \Bookly\Lib\UserBookingData( $form_id );
+            if ( ! $user_data->load() ) {
+                return 0;
+            }
+
+            // getCustomer() only looks the customer up; it never writes.
+            $customer = $user_data->getCustomer();
+
+            return ( $customer && $customer->isLoaded() ) ? (int) $customer->getId() : 0;
+        } catch ( \Exception $e ) {
+            return 0;
+        }
+    }
+
+    /**
      * Snapshot of the cart for the booking currently in progress. Used for the
      * payment-started event, where nothing is written to the database yet.
      *
@@ -106,7 +161,7 @@ class STMS_Bookly_Data
             }
 
             $rows = \Bookly\Lib\Entities\CustomerAppointment::query( 'ca' )
-                ->select( 'ca.id AS ca_id, ca.status, ca.created_at, ca.payment_id, ca.compound_token, ca.collaborative_token, a.start_date, s.title AS service_title, a.custom_service_name, st.full_name AS staff_name, c.email AS customer_email' )
+                ->select( 'ca.id AS ca_id, ca.status, ca.created_at, ca.payment_id, ca.customer_id, ca.compound_token, ca.collaborative_token, a.start_date, s.title AS service_title, a.custom_service_name, st.full_name AS staff_name, c.email AS customer_email' )
                 ->leftJoin( 'Appointment', 'a', 'a.id = ca.appointment_id' )
                 ->leftJoin( 'Service', 's', 's.id = COALESCE(ca.compound_service_id, ca.collaborative_service_id, a.service_id)' )
                 ->leftJoin( 'Staff', 'st', 'st.id = a.staff_id' )
@@ -161,6 +216,7 @@ class STMS_Bookly_Data
 
             $payload = array(
                 'booking_id' => (int) $first['ca_id'],
+                'client_id' => $first['customer_id'] ? (int) $first['customer_id'] : '',
                 'status' => (string) $first['status'],
                 'payment_status' => $payment ? (string) $payment['status'] : '',
                 'order_id' => trim( (string) $first['created_at'] ) . '|' . (string) $first['customer_email'],
