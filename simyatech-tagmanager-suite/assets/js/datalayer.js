@@ -8,6 +8,15 @@
 (function ($, window, document) {
     'use strict';
 
+    // The listeners are installed once per page view. A second copy of the
+    // asset (a caching / optimiser plugin re-emitting it, a theme enqueuing it
+    // again) would otherwise register a second set of observers and double
+    // every push.
+    if (window.STMSTracker) {
+        return;
+    }
+    window.STMSTracker = true;
+
     var cfg = window.STMSData || {};
     window.dataLayer = window.dataLayer || [];
 
@@ -219,12 +228,27 @@
         }
     }
 
-    var initSent = false;
+    /** Amounts always ride as numbers, never as null or a missing key. */
+    function money(value) {
+        return typeof value === 'number' ? value : 0;
+    }
+
+    var initSent = false,
+        lastStep = '';
 
     function pushStepView(step) {
         var index = STEPS.indexOf(step);
 
         if (index === -1) {
+            return;
+        }
+
+        // Bookly re-renders the step it is already on whenever that markup has
+        // to change -- a cart line that failed to save, a declined card, a
+        // gateway switch -- and each of those renders is another AJAX success.
+        // Only a move to a different step is a step view, so the same step is
+        // never reported twice in a row.
+        if (step === lastStep) {
             return;
         }
 
@@ -236,6 +260,8 @@
             }
             initSent = true;
         }
+
+        lastStep = step;
 
         push({
             flow_id: flowId,
@@ -284,9 +310,11 @@
                 flow_id: flowId,
                 event: 'bookly_payment_started',
                 payment_method: method,
-                total: typeof state.total === 'number' ? state.total : 0,
+                subtotal: money(state.subtotal),
+                total: money(state.total),
                 currency: state.currency || '',
                 coupon: state.coupon || '',
+                coupon_discount: money(state.coupon_discount),
                 sessions: state.sessions || 0
             });
         });
@@ -327,6 +355,7 @@
                 payment_status: data.payment_status,
                 order_id: data.order_id,
                 sessions_in_order: data.sessions_in_order,
+                subtotal: data.subtotal,
                 order_total: data.order_total,
                 session_value: data.session_value,
                 currency: data.currency,
@@ -334,7 +363,8 @@
                 therapist: data.therapist,
                 slot_start: data.slot_start,
                 payment_method: data.payment_method,
-                coupon: data.coupon
+                coupon: data.coupon,
+                coupon_discount: data.coupon_discount
             });
         }).fail(function () {
             bookingCompletedSent = false;

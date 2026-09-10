@@ -91,6 +91,15 @@ Steps and their indexes: `init` 0, `time` 1, `cart` 2, `details` 3,
 When Bookly skips the payment step (nothing payable), no payment step view is
 pushed.
 
+✅ **The same step is never pushed twice in a row.** Bookly re-renders the step
+it is already on whenever that markup has to change — a cart line that failed
+to save, a declined card, a gateway switch — and every one of those re-renders
+is another AJAX success. Only a move to a *different* step counts as a step
+view, so a re-render of the current step is ignored. Going back and forward
+again is a real move and is still reported. The tracker also installs its
+listeners only once per page view, so a second copy of the script (a caching or
+optimiser plugin re-emitting it) cannot double the pushes either.
+
 `init` marks the form booting rather than the service step in particular: on a
 therapist page the staff is pre-selected, so Bookly skips the service step and
 boots straight into the time step. Whichever step Bookly renders first counts
@@ -126,9 +135,11 @@ dataLayer.push({
   flow_id: '…',
   event: 'bookly_payment_started',
   payment_method: 'stripe',
-  total: 39.95,
+  subtotal: 39.95,
+  total: 0.8,
   currency: 'USD',
   coupon: 'DAROON23',
+  coupon_discount: 39.15,
   sessions: 1
 });
 ```
@@ -136,10 +147,15 @@ dataLayer.push({
 * `payment_method` — `stripe` or `paypal` (Bookly's `card` / `cloud_stripe`
   gateways are normalised to `stripe`). Other gateways keep their own slug
   (`local`, `free`, …).
-* `total`, `currency`, `coupon`, `sessions` come from the server rather than
-  from the rendered price, which is locale-formatted. The snapshot is taken
-  when the payment step renders and refreshed whenever a coupon, gift card,
-  tips or deposit mode changes it.
+* `subtotal` — cart value before any discount.
+* `total` — what the visitor is about to pay, after every discount.
+* `coupon_discount` — ✅ how much money the applied coupon takes off, `0` when
+  no coupon is applied. Only the coupon: a gift card, a customer-group discount
+  or the discounts add-on are not counted in it.
+* `subtotal`, `total`, `currency`, `coupon`, `coupon_discount`, `sessions` come
+  from the server rather than from the rendered price, which is
+  locale-formatted. The snapshot is taken when the payment step renders and
+  refreshed whenever a coupon, gift card, tips or deposit mode changes it.
 
 Fires once per payment method per flow, so a failed card attempt retried with
 the same method is not counted twice.
@@ -155,6 +171,7 @@ dataLayer.push({
   payment_status: 'completed',
   order_id: '2021-09-02 02:19:00|sheida@example.com',
   sessions_in_order: 1,
+  subtotal: 39.95,
   order_total: 33,
   session_value: 33,
   currency: 'USD',
@@ -162,7 +179,8 @@ dataLayer.push({
   therapist: 'Farzaneh Bidari',
   slot_start: '2021-09-07T21:00:00',
   payment_method: 'stripe',
-  coupon: ''
+  coupon: '',
+  coupon_discount: 6.95
 });
 ```
 
@@ -176,13 +194,15 @@ Read back from the saved order:
 | `payment_status` | payment status (`completed`, `pending`, …) |
 | `order_id` | `created_at` of the booking + `|` + customer email |
 | `sessions_in_order` | booked sessions in the order (compound / collaborative services count once) |
+| `subtotal` | ✅ order value before any discount, as Bookly stored it with the payment |
 | `order_total` | payment total |
-| `session_value` | per-session price stored with the payment, or the total split evenly |
+| `session_value` | ~~per-session price stored with the payment, or the total split evenly~~ ✅ **corrected:** always `order_total / sessions_in_order`. The per-item `service_price` Bookly stores with the payment is the service's *list* price, before any coupon, gift card or group discount, so reporting it here inflated revenue by the whole discount (a 0.80 order was reported as 39.95). |
 | `service` | comma-separated service names (deduplicated) |
 | `therapist` | staff full name(s) |
 | `slot_start` | comma-separated session start times, `Y-m-dTH:i:s` |
 | `payment_method` | `stripe` / `paypal` / gateway slug |
 | `coupon` | applied coupon code, empty when none |
+| `coupon_discount` | ✅ money the coupon took off, `0` when no coupon. Bookly stores the coupon's rule (percentage + fixed deduction) rather than the amount, so the amount is recomputed the way Bookly applied it: `subtotal − max(subtotal × (100 − percent) / 100 − deduction, 0)`. Coupon only — gift card, customer-group and add-on discounts are not counted. Exact whenever the coupon covers every item in the order. |
 
 Fires once per flow.
 

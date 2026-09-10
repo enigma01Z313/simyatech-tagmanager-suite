@@ -124,11 +124,15 @@ class STMS_Bookly_Data
                 }
             }
 
+            $subtotal = round( (float) $cart_info->getSubtotal(), 2 );
+
             $state = array(
                 'sessions' => count( $items ),
+                'subtotal' => $subtotal,
                 'total' => round( (float) $cart_info->getTotal(), 2 ),
                 'currency' => self::currency(),
                 'coupon' => self::flow_coupon( $user_data, $cart_info ),
+                'coupon_discount' => self::cart_coupon_discount( $cart_info, $subtotal ),
                 'services' => $services,
                 'therapist' => (string) $therapist,
                 'slots' => $slots,
@@ -211,8 +215,10 @@ class STMS_Bookly_Data
             }
 
             $payment = self::find_payment( $order_id, $first['payment_id'] );
+            $details = self::payment_details( $payment );
             $order_total = $payment ? round( (float) $payment['total'], 2 ) : 0.0;
             $session_count = count( $sessions );
+            $subtotal = self::details_subtotal( $details, $order_total );
 
             $payload = array(
                 'booking_id' => (int) $first['ca_id'],
@@ -221,14 +227,16 @@ class STMS_Bookly_Data
                 'payment_status' => $payment ? (string) $payment['status'] : '',
                 'order_id' => trim( (string) $first['created_at'] ) . '|' . (string) $first['customer_email'],
                 'sessions_in_order' => $session_count,
+                'subtotal' => $subtotal,
                 'order_total' => $order_total,
-                'session_value' => self::session_value( $payment, $order_total, $session_count ),
+                'session_value' => self::session_value( $order_total, $session_count ),
                 'currency' => self::currency(),
                 'service' => implode( ', ', $services ),
                 'therapist' => implode( ', ', $therapists ),
                 'slot_start' => implode( ', ', $slot_starts ),
                 'payment_method' => $payment ? self::normalize_gateway( $payment['type'] ) : '',
                 'coupon' => $payment ? self::payment_coupon( $payment ) : '',
+                'coupon_discount' => self::payment_coupon_discount( $details, $subtotal ),
             );
 
             return apply_filters( 'stms_order_payload', $payload, $order_id, $sessions );
@@ -288,24 +296,118 @@ class STMS_Bookly_Data
     }
 
     /**
-     * Price of a single session: the per-item price Bookly stored with the
-     * payment, falling back to an even split of the order total.
+     * What one session was actually worth: the paid order total split evenly
+     * over the sessions in the order.
      *
-     * @param array|null $payment
+     * The per-item "service_price" Bookly stores with the payment is the list
+     * price of the service, before any coupon, gift card or group discount, so
+     * reporting that here inflated revenue by the whole discount.
+     *
      * @param float $order_total
      * @param int $session_count
      * @return float
      */
-    private static function session_value( $payment, $order_total, $session_count )
+    private static function session_value( $order_total, $session_count )
     {
-        if ( $payment && ! empty( $payment['details'] ) ) {
-            $details = json_decode( $payment['details'], true );
-            if ( isset( $details['items'][0]['service_price'] ) ) {
-                return round( (float) $details['items'][0]['service_price'], 2 );
-            }
+        return $session_count > 0 ? round( $order_total / $session_count, 2 ) : 0.0;
+    }
+
+    /**
+     * The payment's detail blob, decoded once.
+     *
+     * @param array|null $payment
+     * @return array
+     */
+    private static function payment_details( $payment )
+    {
+        if ( ! $payment || empty( $payment['details'] ) ) {
+            return array();
         }
 
-        return $session_count > 0 ? round( $order_total / $session_count, 2 ) : 0.0;
+        $details = json_decode( $payment['details'], true );
+
+        return is_array( $details ) ? $details : array();
+    }
+
+    /**
+     * Order value before any discount. Bookly stores it with the payment; the
+     * paid total is the fallback for a payment saved without that blob, which
+     * then simply reports no discount.
+     *
+     * @param array $details
+     * @param float $order_total
+     * @return float
+     */
+    private static function details_subtotal( $details, $order_total )
+    {
+        if ( isset( $details['subtotal']['price'] ) ) {
+            return round( (float) $details['subtotal']['price'], 2 );
+        }
+
+        return $order_total;
+    }
+
+    /**
+     * How much money the coupon took off, in the order's currency.
+     *
+     * Bookly stores the coupon's rule (percentage + fixed deduction) with the
+     * payment, not the amount it removed, so the amount is recomputed the way
+     * Bookly applied it. Other reductions - gift card, customer group, the
+     * discounts add-on - are deliberately not counted here.
+     *
+     * @param array $details
+     * @param float $subtotal
+     * @return float
+     */
+    private static function payment_coupon_discount( $details, $subtotal )
+    {
+        if ( empty( $details['coupon'] ) || ! is_array( $details['coupon'] ) ) {
+            return 0.0;
+        }
+
+        $coupon = $details['coupon'];
+        $percent = isset( $coupon['discount'] ) ? (float) $coupon['discount'] : 0.0;
+        $deduction = isset( $coupon['deduction'] ) ? (float) $coupon['deduction'] : 0.0;
+
+        return self::discount_amount( $subtotal, $percent, $deduction );
+    }
+
+    /**
+     * The same amount for the booking still in progress, off the live cart.
+     *
+     * @param \Bookly\Lib\CartInfo $cart_info
+     * @param float $subtotal
+     * @return float
+     */
+    private static function cart_coupon_discount( $cart_info, $subtotal )
+    {
+        $coupon = $cart_info->getCoupon();
+
+        if ( ! $coupon || ! method_exists( $coupon, 'getDiscount' ) ) {
+            return 0.0;
+        }
+
+        return self::discount_amount( $subtotal, (float) $coupon->getDiscount(), (float) $coupon->getDeduction() );
+    }
+
+    /**
+     * Bookly's own coupon arithmetic: take the percentage off first, then the
+     * fixed deduction, and never let the price fall below zero.
+     *
+     * @param float $subtotal
+     * @param float $percent
+     * @param float $deduction
+     * @return float
+     */
+    private static function discount_amount( $subtotal, $percent, $deduction )
+    {
+        if ( $subtotal <= 0 ) {
+            return 0.0;
+        }
+
+        $discounted = max( round( $subtotal * ( 100 - $percent ) / 100 - $deduction, 2 ), 0 );
+
+        return round( $subtotal - $discounted, 2 );
     }
 
     /**

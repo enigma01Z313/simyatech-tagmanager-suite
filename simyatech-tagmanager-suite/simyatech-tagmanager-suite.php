@@ -3,7 +3,7 @@
  * Plugin Name: SimyaTech Tag Manager Suite
  * Plugin URI:  https://github.com/enigma01Z313/simyatech-tagmanager-suite
  * Description: Pushes the Bookly booking funnel (step views, booking start, payment started, booking completed) into the Google Tag Manager dataLayer, and marks every page with its slug / English base slug for GTM triggers.
- * Version:     1.0.0
+ * Version:     1.1.0
  * Author:      Farzin Ahmadi
  * License:     GPLv3
  * Text Domain: simyatech-tagmanager-suite
@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'STMS_VERSION', '1.0.0' );
+define( 'STMS_VERSION', '1.1.0' );
 define( 'STMS_FILE', __FILE__ );
 define( 'STMS_PATH', plugin_dir_path( __FILE__ ) );
 define( 'STMS_URL', plugin_dir_url( __FILE__ ) );
