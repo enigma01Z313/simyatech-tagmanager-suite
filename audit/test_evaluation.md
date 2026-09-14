@@ -15,6 +15,33 @@
 
 ---
 
+## 0. Decision table — what to implement
+
+| # | Issue | Where | Missing or duplicate? | Can it be implemented? | OK to implement? |
+|---|---|---|---|---|---|
+| 1 | Raw customer email inside `order_id` | §2.5, P1 #4 | 🔴 **Missing** — confirmed in source | Yes — 1 line; the numeric order id is already resolved | ✅ **Yes — do this first.** Live GA4 PII exposure |
+| 2 | `client_id` carries the Bookly customer id | §2.4, P1 #3 | 🔴 **Missing** — and wider: it rides on *every* push | Yes — rename to `customer_id`, ~5 lines across JS + PHP + readme | ✅ **Yes — before the GTM rebuild.** Breaking rename for existing GTM variables |
+| 3 | `bookly_booking_pending` event | §2.6, P2 #9 | 🔴 **Missing** | Yes — ~10 lines; `status`/`payment_status` are already in hand | ✅ **Yes** — cheap, feeds the §9.3 gap report |
+| 4 | GA4 `client_id` store (`daroon_booking_events`) | §2.6, P2 #7 | 🔴 **Missing** — no table, no `gtag('get')` | Yes, but it is a new subsystem (table, writer, dedupe, GDPR) | ⚠️ **Only if §9.4 channel attribution is really wanted.** Biggest item here; P5 #21 is blocked on it |
+| 5 | `approved + completed` gating of the completed event | §2.6, P2 #6 | ◐ **Half** — the server-side read exists, the gate does not | Yes | ✅ **Yes — but gate the GTM tag, not the push.** Dropping the push hides pending/failed from reconciliation |
+| 6 | Dedupe `bookly_step_view` | §2.2, P1 #1 | ✅ **Duplicate** — shipped in `d2a711b` | Already done | ❌ **No work.** Re-capture on a current build before re-raising |
+| 7 | `session_value` math + `subtotal` + `coupon_discount` | §4.3, P1 #5 | ✅ **Duplicate** — shipped in `d2a711b` | Already done | ❌ **No work** |
+| 8 | `booking_start` before the first step view | §2.3, P1 #2 | ✅ **Duplicate in substance** — `step_view / init / 0` already marks form boot | Yes — ~3 lines | ❌ **No.** Would double-fire one moment and destroy the "picked a slot" signal |
+| 9 | Tighten the `MutationObserver` onto `.bookly-step-active` | §2.6, P2 #8 | ⚪ **N/A** — there is no MutationObserver | No target to change | ❌ **No.** The AJAX-action approach supersedes it |
+| 10 | `/wp-json/daroon-bookly/v1/verify` endpoint | §2.6, P2 #6 | ⚪ **N/A** — `stms_order_data` is the equivalent | n/a | ❌ **No** — build nothing; see row 5 for the real half |
+| 11 | Staging `console.log` leak in `push()` | §5.3 *(not in the audit)* | 🔴 **Missing** — prints every payload on any "staging" URL | Yes — delete it, use `?stms_debug=1` | ✅ **Yes** — also removes ES6 from an ES5 file |
+| 12 | `client_id` typed `int` or `''` | §5.3 *(not in the audit)* | 🔴 **Missing** — two types for one GA4 parameter | Yes — 1 line | ✅ **Yes** — minor, fold into row 2 |
+| 13 | Nonce fallback accepts an invalid nonce | §5.3 *(not in the audit)* | ◐ **Deliberate** — nonces die on cached pages | n/a | ❌ **No code change** — document the residual risk in the readme |
+| 14 | Baseline SQL | P0 | 🟡 **Out of scope** — ops, read-only | n/a | ✅ **Yes, safe to run** |
+| 15 | GTM container rebuild | P3 #10–14 | 🟡 **Out of scope** — GTM console | n/a | ✅ **Yes — after row 2**, else #14 must be redone |
+| 16 | GA4 admin setup | P4 #15–17 | 🟡 **Out of scope** — GA4 console | n/a | ✅ **Yes** — and map `order_total` → `value`, or revenue stays empty |
+| 17 | QA matrix, rollout, reconciliation | P5 #18–22 | 🟡 **Out of scope** — ops | n/a | ✅ **Yes** — #21 blocked by row 4; re-capture for #3 |
+
+**Implement, in order:** 1 → 2 (+12) → 11 → 3 → 5 → then 4 only if §9.4 is going ahead.
+**Do nothing for:** 6, 7, 8, 9, 10, 13.
+
+---
+
 ## 1. Comparison: Previous Version (`data layer-test.txt`) vs. Current Version (`new-funnel.txt`)
 
 ### Previous Version (`data layer-test.txt`)
