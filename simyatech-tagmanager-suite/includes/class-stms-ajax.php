@@ -20,6 +20,8 @@ class STMS_Ajax
         add_action( 'wp_ajax_nopriv_stms_order_data', array( __CLASS__, 'order_data' ) );
         add_action( 'wp_ajax_stms_customer', array( __CLASS__, 'customer' ) );
         add_action( 'wp_ajax_nopriv_stms_customer', array( __CLASS__, 'customer' ) );
+        add_action( 'wp_ajax_stms_record_event', array( __CLASS__, 'record_event' ) );
+        add_action( 'wp_ajax_nopriv_stms_record_event', array( __CLASS__, 'record_event' ) );
     }
 
     /**
@@ -30,12 +32,39 @@ class STMS_Ajax
     {
         self::check_nonce();
 
-        $client_id = STMS_Bookly_Data::customer_id( self::param( 'form_id' ) );
+        $customer_id = STMS_Bookly_Data::customer_id( self::param( 'form_id' ) );
 
         wp_send_json_success( array(
-            'client_id' => $client_id ? $client_id : '',
+            'customer_id' => $customer_id ? $customer_id : '',
             'logged_in' => is_user_logged_in(),
         ) );
+    }
+
+    /**
+     * Stores the booking against the GA4 client id the browser read from gtag.
+     *
+     * The client is trusted for exactly three things it alone can know - the
+     * GA4 client id, the flow id, and which event it pushed. The booking itself
+     * is re-read from Bookly here, so a caller cannot record an order it does
+     * not hold the session or the token for.
+     */
+    public static function record_event()
+    {
+        self::check_nonce();
+
+        $payload = STMS_Bookly_Data::order_payload( self::param( 'form_id' ), self::param( 'order_token' ) );
+
+        if ( $payload === null ) {
+            wp_send_json_error( array( 'reason' => 'no_order' ) );
+        }
+
+        $stored = STMS_Events_Store::record( $payload, array(
+            'flow_id' => self::param( 'flow_id' ),
+            'ga_client_id' => self::param( 'ga_client_id' ),
+            'event_name' => self::param( 'event_name' ),
+        ) );
+
+        wp_send_json_success( array( 'stored' => (bool) $stored ) );
     }
 
     /**

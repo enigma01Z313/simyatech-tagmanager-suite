@@ -55,23 +55,58 @@ Note: a payment gateway that redirects off-site (PayPal Standard) brings the
 visitor back on a **new page load**, so the completion event of such a booking
 carries a new `flow_id`.
 
-## client_id / user_id
+## customer_id / user_id
 
-Every push carries the Bookly customer id as `client_id`, from the moment the
+Every push carries the Bookly customer id as `customer_id`, from the moment the
 visitor is known:
 
 * **Logged in** — the customer linked to the WordPress account is resolved on
-  the server, so `client_id` rides on the very first push of the page. The same
+  the server, so `customer_id` rides on the very first push of the page. The same
   value is also sent as `user_id`.
 * **Guest** — nobody is identifiable until the details step has put an email /
   phone into the Bookly session, so the id is looked up from that step on and
-  then joins every later push. Only `client_id` is sent: a guest has no account,
+  then joins every later push. Only `customer_id` is sent: a guest has no account,
   so there is no `user_id`.
 
 A guest booking for the first time has no Bookly customer record at all until
-Bookly saves the booking, so their `client_id` appears with
+Bookly saves the booking, so their `customer_id` appears with
 `bookly_booking_completed` and not before. Pushes made while the visitor is
 still unknown simply carry neither field.
+
+✅ **The field used to be called `client_id`, and was renamed in 1.2.0.** GA4
+owns that name for its own visitor id — a long decimal string like
+`1234567890.1234567890` that GA4 attaches by itself — so a Bookly customer id
+travelling under it shadowed the real one and would have shown the wrong value
+in any custom dimension registered for `client_id`. The GA4 client id is not
+pushed to the dataLayer at all; it is stored server-side, in the events table
+below.
+
+## The events table
+
+`{prefix}daroon_booking_events` holds one row per booking, written when the
+booking is reported:
+
+| column | holds |
+| --- | --- |
+| `booking_id` | the booking the row belongs to — unique, so a reload or a retry updates the row instead of adding one |
+| `order_id` | Bookly order id |
+| `order_key` | `created_at` of the first appointment + `\|` + the customer's email — the reconciliation key, **server-side only** |
+| `flow_id` | the flow that produced the booking |
+| `customer_id` | Bookly customer |
+| `ga_client_id` | ✅ the **real GA4 client id**, asked of `gtag('get', …)` when a measurement id is configured, otherwise read from the `_ga` cookie |
+| `event_name` | which event was pushed — `bookly_booking_completed` or `bookly_booking_pending` |
+| `status`, `payment_status`, `order_total`, `currency` | as reported |
+| `event_sent` | the dataLayer push happened before the row was written, so this is `1` |
+
+This is the bridge the channel/source report needs: GA4 never reports its own
+client id back inside an event, and an email address must never be sent to GA4,
+so the join between a booking and the session that produced it can only be made
+here. The table is created on activation, and on the first load after an update
+for a plugin upgraded in place.
+
+An existing `ga_client_id` is never overwritten with an empty one, so a later
+write from a context that could not read the cookie (a gateway return, say)
+cannot erase what an earlier one stored.
 
 ## Events
 
@@ -169,7 +204,7 @@ dataLayer.push({
   booking_id: 125,
   status: 'approved',
   payment_status: 'completed',
-  order_id: '2021-09-02 02:19:00|sheida@example.com',
+  order_id: '412',
   sessions_in_order: 1,
   subtotal: 39.95,
   order_total: 33,
@@ -189,10 +224,10 @@ Read back from the saved order:
 | field | source |
 | --- | --- |
 | `booking_id` | id of the first customer appointment in the order |
-| `client_id` | Bookly customer the order belongs to (also fills in the id for a first-time guest) |
+| `customer_id` | Bookly customer the order belongs to (also fills in the id for a first-time guest) |
 | `status` | its Bookly status (`approved`, `pending`, …) |
 | `payment_status` | payment status (`completed`, `pending`, …) |
-| `order_id` | `created_at` of the booking + `|` + customer email |
+| `order_id` | ~~`created_at` of the booking + `|` + customer email~~ ✅ **corrected:** Bookly's own **order id**. The old composite carried the customer's raw email into GA4, which [Google's PII policy](https://support.google.com/analytics/answer/10374426) forbids outright. The order id is numeric, carries no personal data, and groups every session of a multi-session order under one value by itself. The `created_at\|email` key is still kept, in the `order_key` column of the events table, where the reconciliation query needs it. |
 | `sessions_in_order` | booked sessions in the order (compound / collaborative services count once) |
 | `subtotal` | ✅ order value before any discount, as Bookly stored it with the payment |
 | `order_total` | payment total |
@@ -204,7 +239,39 @@ Read back from the saved order:
 | `coupon` | applied coupon code, empty when none |
 | `coupon_discount` | ✅ money the coupon took off, `0` when no coupon. Bookly stores the coupon's rule (percentage + fixed deduction) rather than the amount, so the amount is recomputed the way Bookly applied it: `subtotal − max(subtotal × (100 − percent) / 100 − deduction, 0)`. Coupon only — gift card, customer-group and add-on discounts are not counted. Exact whenever the coupon covers every item in the order. |
 
-Fires once per flow.
+Fires once per flow — ✅ and only for a booking that is really booked and paid
+for. See `bookly_booking_pending` below for the rest.
+
+### 5. ✅ `bookly_booking_pending` — done step reached, booking not confirmed
+
+Same payload as `bookly_booking_completed`, under a different event name:
+
+```js
+dataLayer.push({
+  flow_id: '…',
+  event: 'bookly_booking_pending',
+  booking_id: 126,
+  status: 'pending',
+  payment_status: 'pending',
+  order_id: '413',
+  …
+});
+```
+
+A booking that is still waiting on its gateway reaches the done step exactly
+like a paid one — a PayPal payment the visitor abandoned at the last screen, a
+card left pending — so reporting every done step as a completed booking counted
+money that was never taken. The server decides which of the two events this is,
+and the browser only reports what it is told.
+
+A booking counts as **completed** when its appointment is `approved` (or `done`)
+and its payment is `completed`. **A free order is confirmed too:** a coupon that
+takes the whole price off leaves Bookly with nothing to charge and often no
+payment row at all, and that booking is as real as any other — so "nothing
+payable" counts as confirmed rather than pending.
+
+The two events share their `flow_id` and their `booking_id`, so a booking that
+is pending at the done step and completes later reconciles against itself.
 
 ## How the data is collected
 
@@ -222,6 +289,12 @@ Fires once per flow.
 * **Completed booking** — `wp_ajax_stms_order_data` resolves the order from the
   caller's Bookly session, falling back to the order token Bookly returns with
   the complete step, then reads the appointments and the payment.
+* ✅ **GA4 client id** — `wp_ajax_stms_record_event` stores the booking against
+  it. The browser is trusted for exactly three things only it can know — the
+  GA4 client id, the flow id, and which of the two booking events it pushed;
+  the booking itself is re-read from Bookly on the server, so a caller cannot
+  record an order it holds neither the session nor the token for. A malformed
+  client id is dropped rather than stored.
 * **Visitor identity** — a logged-in visitor's customer id comes straight from
   the localized JS config. For a guest, `wp_ajax_stms_customer` looks the
   customer up from the caller's own Bookly session (`form_id`) once the details
@@ -250,5 +323,7 @@ force it on with `add_filter( 'stms_debug', '__return_true' );`.
 | `stms_gateway_map` | Bookly gateway slug → reported payment method |
 | `stms_flow_state` | adjust the cart snapshot |
 | `stms_order_payload` | adjust the completed-booking payload |
+| `stms_ga_measurement_id` | ✅ GA4 measurement id (`G-…`), so the tracker can ask `gtag` for the client id instead of falling back to the `_ga` cookie |
+| `stms_events_table` | ✅ name of the events table, without the WordPress prefix (default `daroon_booking_events`) |
 | `stms_js_config` | adjust the whole JS config object |
 | `stms_debug` | turn console logging on/off |

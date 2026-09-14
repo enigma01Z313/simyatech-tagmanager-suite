@@ -19,10 +19,10 @@
 
 | # | Issue | Where | Missing or duplicate? | Can it be implemented? | OK to implement? |
 |---|---|---|---|---|---|
-| 1 | Raw customer email inside `order_id` | §2.5, P1 #4 | 🔴 **Missing** — confirmed in source | Yes — 1 line; the numeric order id is already resolved | ✅ **Yes — do this first.** Live GA4 PII exposure |
-| 2 | `client_id` carries the Bookly customer id | §2.4, P1 #3 | 🔴 **Missing** — and wider: it rides on *every* push | Yes — rename to `customer_id`, ~5 lines across JS + PHP + readme | ✅ **Yes — before the GTM rebuild.** Breaking rename for existing GTM variables |
-| 3 | `bookly_booking_pending` event | §2.6, P2 #9 | 🔴 **Missing** | Yes — ~10 lines; `status`/`payment_status` are already in hand | ✅ **Yes** — cheap, feeds the §9.3 gap report |
-| 4 | GA4 `client_id` store (`daroon_booking_events`) | §2.6, P2 #7 | 🔴 **Missing** — no table, no `gtag('get')` | Yes, but it is a new subsystem (table, writer, dedupe, GDPR) | ⚠️ **Only if §9.4 channel attribution is really wanted.** Biggest item here; P5 #21 is blocked on it |
+| 1 | Raw customer email inside `order_id` | §2.5, P1 #4 | 🔴 **Missing** — confirmed in source | Yes — 1 line; the numeric order id is already resolved | ✅ **Yes — do this first.** Live GA4 PII exposure — ✅ **DONE in 1.2.0** |
+| 2 | `client_id` carries the Bookly customer id | §2.4, P1 #3 | 🔴 **Missing** — and wider: it rides on *every* push | Yes — rename to `customer_id`, ~5 lines across JS + PHP + readme | ✅ **Yes — before the GTM rebuild.** Breaking rename for existing GTM variables — ✅ **DONE in 1.2.0** |
+| 3 | `bookly_booking_pending` event | §2.6, P2 #9 | 🔴 **Missing** | Yes — ~10 lines; `status`/`payment_status` are already in hand | ✅ **Yes** — cheap, feeds the §9.3 gap report — ✅ **DONE in 1.2.0** |
+| 4 | GA4 `client_id` store (`daroon_booking_events`) | §2.6, P2 #7 | 🔴 **Missing** — no table, no `gtag('get')` | Yes, but it is a new subsystem (table, writer, dedupe, GDPR) | ⚠️ **Only if §9.4 channel attribution is really wanted.** Biggest item here; P5 #21 is blocked on it — ✅ **DONE in 1.2.0**, so P5 #21 is unblocked |
 | 5 | `approved + completed` gating of the completed event | §2.6, P2 #6 | ◐ **Half** — the server-side read exists, the gate does not | Yes | ✅ **Yes — but gate the GTM tag, not the push.** Dropping the push hides pending/failed from reconciliation |
 | 6 | Dedupe `bookly_step_view` | §2.2, P1 #1 | ✅ **Duplicate** — shipped in `d2a711b` | Already done | ❌ **No work.** Re-capture on a current build before re-raising |
 | 7 | `session_value` math + `subtotal` + `coupon_discount` | §4.3, P1 #5 | ✅ **Duplicate** — shipped in `d2a711b` | Already done | ❌ **No work** |
@@ -35,10 +35,15 @@
 | 14 | Baseline SQL | P0 | 🟡 **Out of scope** — ops, read-only | n/a | ✅ **Yes, safe to run** |
 | 15 | GTM container rebuild | P3 #10–14 | 🟡 **Out of scope** — GTM console | n/a | ✅ **Yes — after row 2**, else #14 must be redone |
 | 16 | GA4 admin setup | P4 #15–17 | 🟡 **Out of scope** — GA4 console | n/a | ✅ **Yes** — and map `order_total` → `value`, or revenue stays empty |
-| 17 | QA matrix, rollout, reconciliation | P5 #18–22 | 🟡 **Out of scope** — ops | n/a | ✅ **Yes** — #21 blocked by row 4; re-capture for #3 |
+| 17 | QA matrix, rollout, reconciliation | P5 #18–22 | 🟡 **Out of scope** — ops | n/a | ✅ **Yes** — ~~#21 blocked by row 4~~ ✅ **unblocked, row 4 shipped**; re-capture for #3 |
 
 **Implement, in order:** 1 → 2 (+12) → 11 → 3 → 5 → then 4 only if §9.4 is going ahead.
 **Do nothing for:** 6, 7, 8, 9, 10, 13.
+
+✅ **Rows 1, 2, 3 and 4 were implemented on 2026-09-14 and shipped as plugin version 1.2.0**
+(row 12 came along with row 2, since it is the same expression). What each change actually
+does is written up in **§6**. Still open: row 5 (gate the GTM tag), row 11 (the staging
+`console.log`), row 13 (a readme note), and the out-of-scope GTM / GA4 / ops rows 14–17.
 
 ---
 
@@ -120,8 +125,12 @@ In both captures, `booking_start` fires after the `init` (index 0) and `time` (i
 
 **Fix:** Ensure the `booking_start` push in the tracker fires on `.bookly-form` DOM insertion/detection, before the `MutationObserver` processes the first step. ⚪ *if the funnel needs a "form was seen" entry point, use `bookly_step_view step_index = 0` — that is exactly what `init` is for*
 
-### 2.4 `client_id` Misnaming on `bookly_booking_completed`
+### 2.4 `client_id` Misnaming on `bookly_booking_completed` — ✅ FIXED in 1.2.0
 
+> ✅ **Implemented 2026-09-14:** renamed to `customer_id` in `withIdentity()`, the
+> `stms_customer` response and `order_payload()`. `user_id` is unchanged. The GA4 client id
+> is now stored server-side instead (§6).
+>
 > 🔴 **Verdict: real, confirmed — and wider than described. Implement (rename).** `withIdentity()`
 > in `datalayer.js` stamps `client_id` onto **every** push, not just the completed event, and
 > also emits `user_id` for logged-in visitors. Safe to change; the only coupling is the GTM
@@ -134,8 +143,13 @@ The field `client_id` in `bookly_booking_completed` carries the **Bookly custome
 
 **Fix:** Either remove the field from GA4-bound events entirely (keep it server-side only in `daroon_booking_events`), or rename it to `customer_id` and register it as a custom dimension if Bookly customer ID analysis is desired. The GA4 ↔ DB bridge uses the real GA4 `client_id` stored only in the custom table. ✅ *recommended: **rename** — `client_id` → `customer_id` in `withIdentity()`, `STMS_Ajax::customer()`, `STMS_Bookly_Data::order_payload()` and `readme.md`. Keep `user_id`: that one is correct as-is.*
 
-### 2.5 🔴 PII Violation: Raw Email in `order_id`
+### 2.5 🔴 PII Violation: Raw Email in `order_id` — ✅ FIXED in 1.2.0
 
+> ✅ **Implemented 2026-09-14:** `order_id` is now Bookly's numeric order id, and the email
+> no longer leaves the server at all — the `created_at|email` composite is written to
+> `order_key` in the events table and was dropped from the AJAX response as well, so it is
+> not even visible in the browser's network tab (§6).
+>
 > 🔴 **Verdict: real, confirmed in source, highest priority. Implement.**
 > `class-stms-bookly-data.php` builds it literally as
 > `trim( $first['created_at'] ) . '|' . $first['customer_email']`. The numeric Bookly **order
@@ -191,8 +205,8 @@ The following spec requirements cannot be verified from dataLayer captures and r
 |---|---|---|---|
 | 1 | **Dedupe `bookly_step_view`:** compare current step index against last-pushed value; push only on change | §5.2 | ✅ **Duplicate task — already shipped** in `d2a711b` (`lastStep` guard + `window.STMSTracker` double-load guard). No work |
 | 2 | **`booking_start` before first step view:** ensure push fires on `.bookly-form` detection before the `MutationObserver` processes the first step | §5.2 | ⚪ **Can be implemented, not advisable** — would duplicate `step_view / init / 0`. Use `init` as the funnel entry instead |
-| 3 | **Remove or rename `client_id`** from all GA4-bound events. It's the Bookly customer ID — either drop it or rename to `customer_id` and register as custom dimension | §6.3 | 🔴 **Real — implement (rename).** Low risk, ~5 lines across JS + PHP + readme. Must land **before** the Phase 3 GTM build |
-| 4 | **Fix PII in `order_id`:** use Bookly payment ID or SHA-256-hash the `created\|email` composite before pushing to GA4; keep raw key in DB only | §5.3, Google PII policy | 🔴 **Real — implement first.** One line in `order_payload()`; use the already-resolved numeric order id |
+| 3 | **Remove or rename `client_id`** from all GA4-bound events. It's the Bookly customer ID — either drop it or rename to `customer_id` and register as custom dimension | §6.3 | 🔴 **Real — implement (rename).** Low risk, ~5 lines across JS + PHP + readme. Must land **before** the Phase 3 GTM build — ✅ **DONE (1.2.0)**, renamed to `customer_id` |
+| 4 | **Fix PII in `order_id`:** use Bookly payment ID or SHA-256-hash the `created\|email` composite before pushing to GA4; keep raw key in DB only | §5.3, Google PII policy | 🔴 **Real — implement first.** One line in `order_payload()`; use the already-resolved numeric order id — ✅ **DONE (1.2.0)**, now the Bookly order id; the composite moved to `order_key` in the events table |
 | 5 | Keep the corrected `session_value` math and `subtotal`/`coupon_discount` fields (already good) | §4.3 | ✅ **Duplicate task** — verified present in `session_value()`, `details_subtotal()`, `payment_coupon_discount()`, `cart_coupon_discount()`. No work |
 
 ### Phase 2: Verify & Complete Server Architecture
@@ -200,9 +214,9 @@ The following spec requirements cannot be verified from dataLayer captures and r
 | # | Task | Spec Reference | Verdict (2026-09-14) |
 |---|---|---|---|
 | 6 | Confirm `/wp-json/daroon-bookly/v1/verify` endpoint exists and returns only `approved + completed` bookings | §5.4 | ⚪🔴 **Endpoint does not exist and does not need to** — `stms_order_data` (admin-ajax) is the server-side equivalent and is already authoritative. The *gating* half is real but optional: prefer filtering in GTM on `status`/`payment_status` over dropping the push, so pending/failed stay visible |
-| 7 | Confirm `wp_daroon_booking_events` table exists with `UNIQUE(booking_id)`, stores GA4 `client_id` (via `gtag('get',...)` or `_ga` cookie fallback), and `event_sent` flag | §5.3 | 🔴 **Genuinely missing.** Implementable but it is a new subsystem (table + activation hook + writer endpoint + dedupe + retention/GDPR). Only worth it if the §9.4 channel-attribution join is actually going to be built — otherwise skip |
+| 7 | Confirm `wp_daroon_booking_events` table exists with `UNIQUE(booking_id)`, stores GA4 `client_id` (via `gtag('get',...)` or `_ga` cookie fallback), and `event_sent` flag | §5.3 | 🔴 **Genuinely missing.** Implementable but it is a new subsystem (table + activation hook + writer endpoint + dedupe + retention/GDPR). Only worth it if the §9.4 channel-attribution join is actually going to be built — otherwise skip — ✅ **DONE (1.2.0)**: `{prefix}daroon_booking_events`, `UNIQUE(booking_id)`, `ga_client_id` from `gtag('get', …)` with the `_ga` cookie as fallback, `event_sent`, plus `order_key` for the reconciliation join |
 | 8 | Confirm the `MutationObserver` targets `.bookly-step-active` (native stepper class), not `#step-*` injected IDs | §5.2 | ⚪ **N/A — do not implement.** No observer exists; the AJAX-action approach supersedes it |
-| 9 | Implement `bookly_booking_pending` for bookings that reach the done step but are not yet `approved + completed` in the DB (optional, feeds reconciliation gap report) | §4.2, §9.3 | 🔴 **Missing — safe to implement.** `pushBookingCompleted()` already holds `status` + `payment_status`; branch the event name on them. ~10 lines |
+| 9 | Implement `bookly_booking_pending` for bookings that reach the done step but are not yet `approved + completed` in the DB (optional, feeds reconciliation gap report) | §4.2, §9.3 | 🔴 **Missing — safe to implement.** `pushBookingCompleted()` already holds `status` + `payment_status`; branch the event name on them. ~10 lines — ✅ **DONE (1.2.0)**, with a free (fully-couponed) order counted as confirmed rather than pending |
 
 ### Phase 3: GTM Container Rebuild
 
@@ -246,8 +260,8 @@ The following spec requirements cannot be verified from dataLayer captures and r
 
 ### What must be fixed before production
 1. **Dedupe `bookly_step_view`** — payment step fires twice in both versions ✅ **already fixed in `d2a711b`** — re-capture before re-raising
-2. **PII in `order_id`** — raw email sent to GA4; use payment ID or hash 🔴 **real — fix first**
-3. **`client_id` misnaming** — Bookly customer ID pushed to GA4 under GA4's `client_id` name; remove or rename 🔴 **real — rename to `customer_id`**
+2. **PII in `order_id`** — raw email sent to GA4; use payment ID or hash 🔴 **real — fix first** → ✅ **fixed in 1.2.0** (numeric order id)
+3. **`client_id` misnaming** — Bookly customer ID pushed to GA4 under GA4's `client_id` name; remove or rename 🔴 **real — rename to `customer_id`** → ✅ **fixed in 1.2.0**
 4. **`booking_start` ordering** — should fire before first step view ⚪ **design choice, leave as is**
 5. **Server verification** — must be confirmed (not assumed) via endpoint + DB inspection ✅ **confirmed: server-side read is real** (`stms_order_data`); optional status gating remains
 6. **Baseline SQL** — must be run before rollout to establish the gap target 🟡 **ops, unchanged**
@@ -295,11 +309,11 @@ repeat with no intervening step, that is a new bug with a different cause.**
 |---|---|---|---|---|
 | 1 | Dedupe `bookly_step_view` (§2.2, P1 #1) | **Duplicate** — shipped in `d2a711b` | n/a | **No work.** Re-verify on a current build |
 | 2 | `booking_start` before first step view (§2.3, P1 #2) | **Duplicate in substance** — `bookly_step_view / init / 0` already marks form boot | Yes — move the push out of the `button.bookly-hour` click handler, ~3 lines | **No.** It would emit two events for one moment and destroy the "picked a slot" signal, which is the more useful funnel entry |
-| 3 | `client_id` misnaming (§2.4, P1 #3, P3 #14, P4 #16) | **Missing — real**, and broader: `withIdentity()` stamps it on *every* push (step views included) and adds `user_id` when logged in | Yes — rename to `customer_id` in `datalayer.js`, `class-stms-ajax.php`, `class-stms-bookly-data.php`, `readme.md` | **Yes.** Do it **before** the GTM rebuild. It is a breaking rename for any existing GTM variable |
-| 4 | PII email in `order_id` (§2.5, P1 #4) | **Missing — real, confirmed:** `'order_id' => trim( $first['created_at'] ) . '\|' . $first['customer_email']` | Yes — one line; `resolve_order_id()` already returns the numeric Bookly order id | **Yes — highest priority.** Live GA4 policy exposure. Prefer the order id over the payment id: it also groups multi-session bundles (QA #6) |
+| 3 | `client_id` misnaming (§2.4, P1 #3, P3 #14, P4 #16) | **Missing — real**, and broader: `withIdentity()` stamps it on *every* push (step views included) and adds `user_id` when logged in | Yes — rename to `customer_id` in `datalayer.js`, `class-stms-ajax.php`, `class-stms-bookly-data.php`, `readme.md` | **Yes.** Do it **before** the GTM rebuild. It is a breaking rename for any existing GTM variable — ✅ **done in 1.2.0** |
+| 4 | PII email in `order_id` (§2.5, P1 #4) | **Missing — real, confirmed:** `'order_id' => trim( $first['created_at'] ) . '\|' . $first['customer_email']` | Yes — one line; `resolve_order_id()` already returns the numeric Bookly order id | **Yes — highest priority.** Live GA4 policy exposure. Prefer the order id over the payment id: it also groups multi-session bundles (QA #6) — ✅ **done in 1.2.0** |
 | 5 | `/wp-json/…/verify` + approved-only gating (§2.6, P2 #6) | **Half duplicate, half missing** — the server-side read exists (`stms_order_data` → `order_payload()`); the `approved + completed` gate does not | Yes — either filter in `order_payload()` or condition the GA4 tag in GTM | **Yes, but in GTM.** Gate the *tag*, not the *push* — dropping the push server-side would hide pending/failed bookings from reconciliation |
-| 6 | `daroon_booking_events` table + GA4 `client_id` (§2.6, P2 #7, P5 #21) | **Missing — real.** No table, no `gtag('get', …)`, no `_ga` fallback anywhere | Yes, but it is a new subsystem: table + activation hook + write endpoint + `UNIQUE(booking_id)` + `event_sent` + retention/GDPR | **Only if §9.4 channel attribution is actually being built.** It is the single largest item in this plan; skip it otherwise |
-| 7 | `bookly_booking_pending` (§2.6, P2 #9) | **Missing — real** | Yes — `pushBookingCompleted()` already receives `status` and `payment_status`; branch the event name, ~10 lines | **Yes, cheap and useful** for the §9.3 gap report. Keep `flow_id` and the payload identical so the two events reconcile |
+| 6 | `daroon_booking_events` table + GA4 `client_id` (§2.6, P2 #7, P5 #21) | **Missing — real.** No table, no `gtag('get', …)`, no `_ga` fallback anywhere | Yes, but it is a new subsystem: table + activation hook + write endpoint + `UNIQUE(booking_id)` + `event_sent` + retention/GDPR | **Only if §9.4 channel attribution is actually being built.** It is the single largest item in this plan; skip it otherwise — ✅ **done in 1.2.0**, so P5 #21 is unblocked |
+| 7 | `bookly_booking_pending` (§2.6, P2 #9) | **Missing — real** | Yes — `pushBookingCompleted()` already receives `status` and `payment_status`; branch the event name, ~10 lines | **Yes, cheap and useful** for the §9.3 gap report. Keep `flow_id` and the payload identical so the two events reconcile — ✅ **done in 1.2.0** |
 | 8 | Baseline SQL, GTM rebuild, GA4 admin, QA, rollout (P0, P3, P4, P5) | **Out of scope for this repo** — no plugin code involved | n/a | **Safe to proceed**, with two catches: map `order_total` → `value` in the GA4 tag (P4 #17), and P5 #21 is blocked by item 6 |
 
 ### 5.3 Not in the audit — found while checking the code
@@ -309,3 +323,109 @@ repeat with no intervening step, that is a new bug with a different cause.**
 | Staging console leak: `const url = window.location.href; if (url.includes("staging")) { console.log(…) }` prints every payload — including `client_id` — on any URL containing "staging", and duplicates the `cfg.debug` branch three lines below it | `datalayer.js`, `push()` | Remove it and use the existing `?stms_debug=1` / `stms_debug` filter. It also introduces ES6 (`const`, `String.includes`) into an otherwise ES5 file, which breaks the older-browser floor the rest of the file keeps |
 | `client_id` is an `int` when known and `''` when not, so GA4 receives two types for one parameter | `class-stms-bookly-data.php`, `order_payload()` | Cast to string, or omit the key entirely when unknown (the JS side already omits it) |
 | A request with an invalid nonce still succeeds when it carries a `form_id` or `order_token` | `class-stms-ajax.php`, `check_nonce()` | Deliberate and documented (nonces die on cached pages), and both tokens are unguessable — but it does mean anyone holding a form token can read that cart. Worth an explicit note in the readme rather than a code change |
+
+---
+
+## 6. What was implemented (2026-09-14, plugin 1.2.0)
+
+Decision-table rows **1, 2, 3 and 4** — plus row 12, which is the same expression as row 2.
+Rows 5, 11 and 13 were left open on purpose; rows 6–10 are the "do nothing" set.
+
+### 6.1 Row 1 — the email is out of `order_id`
+
+`class-stms-bookly-data.php`, `order_payload()`:
+
+```php
+// before
+'order_id' => trim( (string) $first['created_at'] ) . '|' . (string) $first['customer_email'],
+// after
+'order_id' => (string) $order_id,   // Bookly's own numeric order id
+```
+
+The `c.email AS customer_email` select and the `Customer` join went with it, so the address
+no longer reaches the AJAX response either — it is not in the dataLayer *and* not in the
+browser's network tab. The `created_at|email` key that the reconciliation query needs is
+rebuilt server-side by the new `STMS_Bookly_Data::order_key()` and written to the events
+table, never sent anywhere.
+
+Using the **order id** rather than the payment id also means every session of a multi-session
+order already shares one `order_id`, which is what QA test #6 checks.
+
+### 6.2 Row 2 (+12) — `client_id` → `customer_id`
+
+Renamed in `withIdentity()` (`datalayer.js`), in the `stms_customer` response
+(`class-stms-ajax.php`) and in `order_payload()`. `user_id` is untouched — that one was
+always correct. The value is now consistently a string (row 12).
+
+**This is a breaking change for GTM:** any Data Layer Variable still reading `client_id` will
+go empty. Do the Phase 3 rebuild against `customer_id`, and register the custom dimension in
+Phase 4 #16 under that name.
+
+### 6.3 Row 3 — `bookly_booking_pending`
+
+`pushBookingCompleted()` became `pushBookingResult()`, and the server now returns a
+`confirmed` flag that decides the event name:
+
+```php
+private static function is_confirmed( $status, $payment, $order_total )
+{
+    if ( ! in_array( $status, array( 'approved', 'done' ), true ) ) { return false; }
+    if ( $payment === null || $order_total <= 0 ) { return true; }   // nothing payable
+    return (string) $payment['status'] === 'completed';
+}
+```
+
+The payload, the `flow_id` and the `booking_id` are identical across the two events, so a
+booking that is pending at the done step and completes later reconciles against itself.
+
+⚠️ **One trap worth knowing about, which the audit's `approved + completed` rule would have
+walked into:** a coupon that takes the whole price off (QA test #7, `DAROON23`) leaves Bookly
+with nothing to charge and frequently **no payment row at all**. Gating strictly on
+`payment_status === 'completed'` would have filed every free booking as pending, forever.
+Nothing payable therefore counts as confirmed.
+
+### 6.4 Row 4 — the events table and the real GA4 client id
+
+New `includes/class-stms-events-store.php` + a `stms_record_event` AJAX action.
+
+* Table `{prefix}daroon_booking_events` — the name the spec's SQL expects, overridable with
+  the `stms_events_table` filter. Created on activation, and on the first load after an
+  update for a plugin upgraded in place.
+* Columns: `booking_id` (**UNIQUE**), `order_id`, `order_key`, `flow_id`, `customer_id`,
+  `ga_client_id`, `event_name`, `status`, `payment_status`, `order_total`, `currency`,
+  `event_sent`, `created_at`, `updated_at`.
+* The GA4 client id comes from `gtag('get', <measurement id>, 'client_id', …)` when
+  `stms_ga_measurement_id` is set, and from the `_ga` cookie otherwise — both hold the same
+  value. A 1-second timeout means a silent gtag never costs the recording, and a value that
+  is not `digits.digits` is dropped rather than stored.
+* The write is an upsert on `booking_id`, so a reload, a retry or a PayPal round-trip updates
+  one row instead of adding another. An existing `ga_client_id` is never overwritten by an
+  empty one, so a gateway return that cannot read the cookie cannot erase what the original
+  page stored.
+* The browser is trusted for exactly three values only it can know — the GA4 client id, the
+  flow id, and which event it pushed. The booking is re-read from Bookly on the server, so a
+  caller cannot record an order it holds neither the session nor the token for.
+
+**This unblocks Phase 5 #21** (the channel/source join), which had no client id to join on.
+
+### 6.5 Files touched
+
+| File | Change |
+| --- | --- |
+| `assets/js/datalayer.js` | identity rename; `pushBookingResult()` + pending event; `gaClientId()` / `cookieClientId()` / `recordEvent()` |
+| `includes/class-stms-bookly-data.php` | numeric `order_id`; email out of the query; `is_confirmed()`; `order_key()` |
+| `includes/class-stms-events-store.php` | **new** — table install + upsert |
+| `includes/class-stms-ajax.php` | `customer_id` in the response; `stms_record_event` endpoint |
+| `includes/class-stms-assets.php` | `measurementId` in the JS config |
+| `includes/class-stms-plugin.php` | boots the store |
+| `simyatech-tagmanager-suite.php` | 1.1.0 → **1.2.0**; activation hook |
+| `readme.md` | documents all of the above |
+
+### 6.6 Still open
+
+| Row | Item | Why it was left |
+| --- | --- | --- |
+| 5 | `approved + completed` gating | Belongs in the GTM tag, not in the plugin — gating the push would hide pending bookings from the very reconciliation report they feed. The `confirmed` flag and the separate `bookly_booking_pending` event (row 3) give GTM everything it needs to gate on |
+| 11 | Staging `console.log` in `push()` | Not in rows 1–4. Still recommended: it prints every payload on any URL containing "staging" and duplicates the `cfg.debug` branch below it |
+| 13 | Nonce fallback | A readme note, not a code change |
+| 14–17 | Baseline SQL, GTM, GA4 admin, QA | Outside this repo |

@@ -57,6 +57,10 @@ class STMS_Assets
             // is looked up over AJAX once the details step has run.
             'loggedIn' => is_user_logged_in(),
             'customerId' => $customer_id ? $customer_id : '',
+            // GA4 measurement id, so the tracker can ask gtag for the real GA4
+            // client id. Left empty it falls back to reading the _ga cookie,
+            // which carries the same value.
+            'measurementId' => (string) apply_filters( 'stms_ga_measurement_id', '' ),
             // URL segment that marks a therapist single page: /team/<name>
             'therapistSegment' => apply_filters( 'stms_therapist_path_segment', 'team' ),
             // base slug of the generic booking page

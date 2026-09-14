@@ -163,14 +163,14 @@
      * that step on and then rides along on every later push.
      */
     var identity = {
-        clientId: String(cfg.customerId || ''),
+        customerId: String(cfg.customerId || ''),
         loggedIn: !!cfg.loggedIn
     };
 
     var customerLookup = null;
 
     function resolveCustomer(formId) {
-        if (identity.clientId !== '' || customerLookup) {
+        if (identity.customerId !== '' || customerLookup) {
             return;
         }
 
@@ -182,11 +182,11 @@
             var data = response && response.success ? response.data : null;
 
             if (data) {
-                identity.clientId = data.client_id ? String(data.client_id) : '';
+                identity.customerId = data.customer_id ? String(data.customer_id) : '';
                 identity.loggedIn = !!data.logged_in;
             }
             // Nobody matched yet -- let a later step try again.
-            if (identity.clientId === '') {
+            if (identity.customerId === '') {
                 customerLookup = null;
             }
         }).fail(function () {
@@ -195,19 +195,90 @@
     }
 
     /**
-     * client_id is the Bookly customer id. For a logged-in visitor it doubles
-     * as user_id; a guest has no account, so only client_id is sent.
+     * customer_id is the Bookly customer id. It is deliberately not called
+     * client_id: GA4 owns that name for its own visitor id, and sending a
+     * Bookly id under it would shadow the real one wherever the two meet.
+     * For a logged-in visitor it doubles as user_id; a guest has no account,
+     * so only customer_id is sent.
      */
     function withIdentity(payload) {
-        if (identity.clientId !== '') {
-            payload.client_id = identity.clientId;
+        if (identity.customerId !== '') {
+            payload.customer_id = identity.customerId;
 
             if (identity.loggedIn) {
-                payload.user_id = identity.clientId;
+                payload.user_id = identity.customerId;
             }
         }
 
         return payload;
+    }
+
+    // ----------------------------------------------------------- GA4 client
+
+    /**
+     * The GA4 client id, which GA4 never reports back inside an event: it is
+     * asked of gtag when the measurement id is configured, and read out of the
+     * _ga cookie otherwise. Both give the same value; the cookie is simply not
+     * written until GA4 has run at least once.
+     *
+     * The callback always runs, with an empty string when nothing answered in
+     * time, so a booking is never left unrecorded over a missing analytics id.
+     */
+    function gaClientId(callback) {
+        var settled = false,
+            timer;
+
+        function settle(value) {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            window.clearTimeout(timer);
+            callback(value || cookieClientId());
+        }
+
+        if (typeof window.gtag === 'function' && cfg.measurementId) {
+            timer = window.setTimeout(function () {
+                settle('');
+            }, 1000);
+
+            try {
+                window.gtag('get', cfg.measurementId, 'client_id', settle);
+                return;
+            } catch (e) {
+                settle('');
+                return;
+            }
+        }
+
+        settle('');
+    }
+
+    /** "_ga=GA1.1.1234567890.1234567890" -> "1234567890.1234567890" */
+    function cookieClientId() {
+        var match = String(document.cookie).match(/(?:^|;\s*)_ga=GA\d+\.\d+\.(\d+\.\d+)/);
+
+        return match ? match[1] : '';
+    }
+
+    /**
+     * Stores the booking against that GA4 client id, so the booking can later
+     * be joined back to the session -- and the channel -- that produced it.
+     * The server re-reads the booking itself; only what the browser alone knows
+     * is sent.
+     */
+    function recordEvent(eventName, formId, orderToken) {
+        gaClientId(function (clientId) {
+            $.post(cfg.ajaxurl, {
+                action: 'stms_record_event',
+                nonce: cfg.nonce,
+                form_id: formId || '',
+                order_token: orderToken || '',
+                flow_id: flowId,
+                ga_client_id: clientId,
+                event_name: eventName
+            });
+        });
     }
 
     // ------------------------------------------------------------ dataLayer
@@ -320,13 +391,13 @@
         });
     }
 
-    var bookingCompletedSent = false;
+    var bookingResultSent = false;
 
-    function pushBookingCompleted(formId, orderToken) {
-        if (bookingCompletedSent) {
+    function pushBookingResult(formId, orderToken) {
+        if (bookingResultSent) {
             return;
         }
-        bookingCompletedSent = true;
+        bookingResultSent = true;
 
         $.post(cfg.ajaxurl, {
             action: 'stms_order_data',
@@ -335,7 +406,7 @@
             order_token: orderToken || ''
         }).done(function (response) {
             if (!response || !response.success || !response.data) {
-                bookingCompletedSent = false;
+                bookingResultSent = false;
                 return;
             }
 
@@ -343,13 +414,18 @@
 
             // The saved order names its customer, so this event and every push
             // after it carry the id even when nothing resolved it earlier.
-            if (data.client_id) {
-                identity.clientId = String(data.client_id);
+            if (data.customer_id) {
+                identity.customerId = String(data.customer_id);
             }
+
+            // The done step is reached by a booking still waiting on its
+            // gateway just as much as by a paid one, so the server decides
+            // which of the two this is.
+            var eventName = data.confirmed ? 'bookly_booking_completed' : 'bookly_booking_pending';
 
             push({
                 flow_id: flowId,
-                event: 'bookly_booking_completed',
+                event: eventName,
                 booking_id: data.booking_id,
                 status: data.status,
                 payment_status: data.payment_status,
@@ -366,8 +442,10 @@
                 coupon: data.coupon,
                 coupon_discount: data.coupon_discount
             });
+
+            recordEvent(eventName, formId, orderToken);
         }).fail(function () {
-            bookingCompletedSent = false;
+            bookingResultSent = false;
         });
     }
 
@@ -445,7 +523,7 @@
             if (step === 'payment') {
                 refreshState(formId);
             } else if (step === 'done') {
-                pushBookingCompleted(formId, response.bookly_order);
+                pushBookingResult(formId, response.bookly_order);
             }
 
             return;

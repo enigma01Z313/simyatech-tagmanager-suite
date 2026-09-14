@@ -34,6 +34,7 @@ class STMS_Plugin
         STMS_Page_Meta::init();
         STMS_Assets::init();
         STMS_Ajax::init();
+        STMS_Events_Store::init();
     }
 
     /**

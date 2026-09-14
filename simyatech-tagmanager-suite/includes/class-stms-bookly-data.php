@@ -165,11 +165,10 @@ class STMS_Bookly_Data
             }
 
             $rows = \Bookly\Lib\Entities\CustomerAppointment::query( 'ca' )
-                ->select( 'ca.id AS ca_id, ca.status, ca.created_at, ca.payment_id, ca.customer_id, ca.compound_token, ca.collaborative_token, a.start_date, s.title AS service_title, a.custom_service_name, st.full_name AS staff_name, c.email AS customer_email' )
+                ->select( 'ca.id AS ca_id, ca.status, ca.created_at, ca.payment_id, ca.customer_id, ca.compound_token, ca.collaborative_token, a.start_date, s.title AS service_title, a.custom_service_name, st.full_name AS staff_name' )
                 ->leftJoin( 'Appointment', 'a', 'a.id = ca.appointment_id' )
                 ->leftJoin( 'Service', 's', 's.id = COALESCE(ca.compound_service_id, ca.collaborative_service_id, a.service_id)' )
                 ->leftJoin( 'Staff', 'st', 'st.id = a.staff_id' )
-                ->leftJoin( 'Customer', 'c', 'c.id = ca.customer_id' )
                 ->where( 'ca.order_id', $order_id )
                 ->sortBy( 'a.start_date' )
                 ->fetchArray();
@@ -222,10 +221,15 @@ class STMS_Bookly_Data
 
             $payload = array(
                 'booking_id' => (int) $first['ca_id'],
-                'client_id' => $first['customer_id'] ? (int) $first['customer_id'] : '',
+                'customer_id' => $first['customer_id'] ? (string) (int) $first['customer_id'] : '',
                 'status' => (string) $first['status'],
                 'payment_status' => $payment ? (string) $payment['status'] : '',
-                'order_id' => trim( (string) $first['created_at'] ) . '|' . (string) $first['customer_email'],
+                // Bookly's own order id: numeric, stable, and free of the
+                // customer's email. The created_at|email composite the
+                // reconciliation key needs never leaves the server; it is
+                // written to the events table by STMS_Events_Store instead.
+                'order_id' => (string) $order_id,
+                'confirmed' => self::is_confirmed( (string) $first['status'], $payment, $order_total ),
                 'sessions_in_order' => $session_count,
                 'subtotal' => $subtotal,
                 'order_total' => $order_total,
@@ -242,6 +246,70 @@ class STMS_Bookly_Data
             return apply_filters( 'stms_order_payload', $payload, $order_id, $sessions );
         } catch ( \Exception $e ) {
             return null;
+        }
+    }
+
+    /**
+     * Is this order actually booked and paid for?
+     *
+     * An order still waiting on its gateway - a PayPal payment the visitor
+     * never finished, a card left pending - reaches the done step all the same,
+     * so the completed event must not be claimed for it.
+     *
+     * A free order is the exception that a plain "payment is completed" test
+     * gets wrong: a coupon that takes the whole price off leaves Bookly with
+     * nothing to charge and often no payment row at all, yet the booking is as
+     * real as any other. Nothing payable therefore counts as confirmed.
+     *
+     * @param string $status Bookly appointment status
+     * @param array|null $payment
+     * @param float $order_total
+     * @return bool
+     */
+    private static function is_confirmed( $status, $payment, $order_total )
+    {
+        if ( ! in_array( $status, array( 'approved', 'done' ), true ) ) {
+            return false;
+        }
+
+        if ( $payment === null || $order_total <= 0 ) {
+            return true;
+        }
+
+        return (string) $payment['status'] === 'completed';
+    }
+
+    /**
+     * The reconciliation key for an order: when its first appointment was
+     * created, and the email of the customer it belongs to.
+     *
+     * It carries an email address, so it is only ever written to the events
+     * table. Nothing here reaches the dataLayer.
+     *
+     * @param int $order_id
+     * @return string
+     */
+    public static function order_key( $order_id )
+    {
+        if ( ! self::is_available() || ! $order_id ) {
+            return '';
+        }
+
+        try {
+            $row = \Bookly\Lib\Entities\CustomerAppointment::query( 'ca' )
+                ->select( 'ca.created_at, c.email' )
+                ->leftJoin( 'Customer', 'c', 'c.id = ca.customer_id' )
+                ->where( 'ca.order_id', (int) $order_id )
+                ->sortBy( 'ca.id' )
+                ->fetchRow();
+
+            if ( ! $row ) {
+                return '';
+            }
+
+            return trim( (string) $row['created_at'] ) . '|' . (string) $row['email'];
+        } catch ( \Exception $e ) {
+            return '';
         }
     }
 
