@@ -438,9 +438,13 @@
                 status: data.status,
                 payment_status: data.payment_status,
                 order_id: data.order_id,
+                // GA4 knows this id as transaction_id and the money as value,
+                // so the tag maps both without renaming anything by hand.
+                transaction_id: data.order_id,
                 sessions_in_order: data.sessions_in_order,
                 subtotal: data.subtotal,
                 order_total: data.order_total,
+                value: data.order_total,
                 session_value: data.session_value,
                 currency: data.currency,
                 service: data.service,

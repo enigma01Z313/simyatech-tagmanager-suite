@@ -30,12 +30,14 @@
 - **What:** Map the dataLayer `order_id` into the GA4 `transaction_id` parameter.
 - **Why:** GA4 auto-deduplicates events by `transaction_id`. This is the revenue safety net — even if double-click dedupe (QA #11) or any future bug double-fires the completed event, **revenue and conversions cannot double-count**.
 - **Acceptance:** In GTM Preview, submit a booking and click submit twice rapidly → GA4 DebugView shows the event; BigQuery/GA4 reports count it once per `transaction_id`.
+- **DataLayer side done:** the `bookly_booking_completed` push now carries `transaction_id` (= `order_id`) under GA4's own parameter name, so the GTM step is a straight `{{DLV - transaction_id}}` mapping with no rename. **Still to do in GTM: the mapping itself** — a dataLayer key is inert until the tag sends it.
 
 ### 2. Confirm revenue mapping on `bookly_booking_completed`
 
 - **What:** GA4 event parameter `value` = dataLayer `order_total`, `currency` = dataLayer `currency` (`USD`).
 - **Why:** DataLayer alone does not prove the GTM tag maps revenue; unmapped `value` = silently wrong revenue reporting.
 - **Acceptance:** GTM Preview shows `value: 0.8, currency: "USD"` on the fired tag; GA4 DebugView shows the same.
+- **DataLayer side done:** the push now carries `value` (= `order_total`) alongside the existing `currency`, both under GA4's own parameter names. **Still to do in GTM: map them on the tag.**
 
 ### 3. Normalize the `therapist` parameter format ✅
 
