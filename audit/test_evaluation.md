@@ -17,25 +17,25 @@
 
 ## 0. Decision table — what to implement
 
-| # | Issue | Status | Missing or duplicate? | Can it be implemented? | OK to implement? |
-|---|---|---|---|---|---|
-| 1 | Raw customer email inside `order_id` (§2.5, P1 #4) | ✅ **DONE — 1.2.0** | 🔴 Missing | Yes — 1 line; the numeric order id is already resolved | Yes — done first. Live GA4 PII exposure |
-| 2 | `client_id` carries the Bookly customer id (§2.4, P1 #3) | ✅ **DONE — 1.2.0** | 🔴 Missing — and wider: it rides on *every* push | Yes — renamed to `customer_id` across JS + PHP + readme | Yes — landed before the GTM rebuild. Breaking rename for existing GTM variables |
-| 3 | `bookly_booking_pending` event (§2.6, P2 #9) | ✅ **DONE — 1.2.0** | 🔴 Missing | Yes — `status`/`payment_status` were already in hand | Yes — cheap, feeds the §9.3 gap report |
-| 4 | GA4 `client_id` store `daroon_booking_events` (§2.6, P2 #7) | ✅ **DONE — 1.2.0** | 🔴 Missing — no table, no `gtag('get')` | Yes — new subsystem: table, writer, dedupe | Yes — built; P5 #21 is now unblocked |
-| 5 | `approved + completed` gating (§2.6, P2 #6) | ⬜ **OPEN** | ◐ Half — the server-side read exists, the gate does not | Yes | Yes — **but gate the GTM tag, not the push.** Dropping the push hides pending/failed from reconciliation |
-| 11 | Staging `console.log` leak in `push()` (§5.3, *not in the audit*) | ⬜ **OPEN** | 🔴 Missing | Yes — delete it, use `?stms_debug=1` | Yes — also removes ES6 from an ES5 file |
-| 13 | Nonce fallback accepts an invalid nonce (§5.3, *not in the audit*) | ⬜ **OPEN** — doc only | ◐ Deliberate — nonces die on cached pages | n/a | No code change — document the residual risk in the readme |
-| 12 | `client_id` typed `int` or `''` (§5.3, *not in the audit*) | ✅ **DONE — 1.2.0** | 🔴 Missing — two types for one GA4 parameter | Yes — 1 line | Yes — came along with row 2, same expression |
-| 6 | Dedupe `bookly_step_view` (§2.2, P1 #1) | ✅ **ALREADY DONE — `d2a711b`** | ✅ Duplicate | Already done | ❌ No work. Re-capture on a current build before re-raising |
-| 7 | `session_value` math + `subtotal` + `coupon_discount` (§4.3, P1 #5) | ✅ **ALREADY DONE — `d2a711b`** | ✅ Duplicate | Already done | ❌ No work |
-| 8 | `booking_start` before the first step view (§2.3, P1 #2) | ❌ **WON'T DO** | ✅ Duplicate in substance — `step_view / init / 0` already marks form boot | Yes — ~3 lines | ❌ No. Would double-fire one moment and destroy the "picked a slot" signal |
-| 9 | Tighten the `MutationObserver` onto `.bookly-step-active` (§2.6, P2 #8) | ❌ **WON'T DO** | ⚪ N/A — there is no MutationObserver | No target to change | ❌ No. The AJAX-action approach supersedes it |
-| 10 | `/wp-json/daroon-bookly/v1/verify` endpoint (§2.6, P2 #6) | ❌ **WON'T DO** | ⚪ N/A — `stms_order_data` is the equivalent | n/a | ❌ Build nothing; see row 5 for the real half |
-| 14 | Baseline SQL (P0) | 🟡 **OUT OF SCOPE** — ops | 🟡 Out of scope — read-only | n/a | Yes, safe to run |
-| 15 | GTM container rebuild (P3 #10–14) | 🟡 **OUT OF SCOPE** — GTM console | 🟡 Out of scope | n/a | Yes — row 2 has landed, so build against `customer_id` |
-| 16 | GA4 admin setup (P4 #15–17) | 🟡 **OUT OF SCOPE** — GA4 console | 🟡 Out of scope | n/a | Yes — and map `order_total` → `value`, or revenue stays empty |
-| 17 | QA matrix, rollout, reconciliation (P5 #18–22) | 🟡 **OUT OF SCOPE** — ops | 🟡 Out of scope | n/a | Yes — ~~#21 blocked by row 4~~ unblocked, row 4 shipped; re-capture for #3 |
+| # | Issue | Status | How it was fixed | Missing or duplicate? | Can it be implemented? | OK to implement? |
+|---|---|---|---|---|---|---|
+| 1 | Raw customer email inside `order_id` (§2.5, P1 #4) | ✅ **DONE — 1.2.0** | `order_payload()` now returns the numeric Bookly order id. The `c.email` select and the `Customer` join were deleted, so the address is absent from the AJAX response too; `STMS_Bookly_Data::order_key()` rebuilds the `created_at \| email` key server-side for the events table | 🔴 Missing | Yes — 1 line; the numeric order id was already resolved | Yes — done first. Live GA4 PII exposure |
+| 2 | `client_id` carries the Bookly customer id (§2.4, P1 #3) | ✅ **DONE — 1.2.0** | Renamed to `customer_id` in `withIdentity()` (`datalayer.js`), the `stms_customer` response and `order_payload()`. `user_id` left as it was | 🔴 Missing — and wider: it rides on *every* push | Yes — across JS + PHP + readme | Yes — landed before the GTM rebuild. Breaking rename for existing GTM variables |
+| 3 | `bookly_booking_pending` event (§2.6, P2 #9) | ✅ **DONE — 1.2.0** | `pushBookingCompleted()` → `pushBookingResult()`; the server returns a `confirmed` flag from `is_confirmed()` and the browser picks the event name from it. A free order counts as confirmed, since a fully-couponed booking often has no payment row at all | 🔴 Missing | Yes — `status`/`payment_status` were already in hand | Yes — cheap, feeds the §9.3 gap report |
+| 4 | GA4 `client_id` store `daroon_booking_events` (§2.6, P2 #7) | ✅ **DONE — 1.2.0** | New `class-stms-events-store.php` + `stms_record_event` endpoint. Table with `UNIQUE(booking_id)`, `ga_client_id`, `event_sent`, `order_key`; id read from `gtag(get…)` or the `_ga` cookie; upsert per booking, never overwritten by an empty value; the booking is re-read from Bookly server-side | 🔴 Missing — no table, no `gtag(get)` | Yes — new subsystem: table, writer, dedupe | Yes — built; P5 #21 is now unblocked |
+| 12 | `client_id` typed `int` or `''` (§5.3, *not in the audit*) | ✅ **DONE — 1.2.0** | Cast to string on the same line the rename touched | 🔴 Missing — two types for one GA4 parameter | Yes — 1 line | Yes — came along with row 2, same expression |
+| 6 | Dedupe `bookly_step_view` (§2.2, P1 #1) | ✅ **ALREADY DONE — `d2a711b`** | Nothing to do — the `lastStep` guard and the `window.STMSTracker` double-load guard were already shipped on 2026-09-11 | ✅ Duplicate | Already done | ❌ No work. Re-capture on a current build before re-raising |
+| 7 | `session_value` math + `subtotal` + `coupon_discount` (§4.3, P1 #5) | ✅ **ALREADY DONE — `d2a711b`** | Nothing to do — `session_value()`, `details_subtotal()` and the two coupon-discount helpers were already shipped | ✅ Duplicate | Already done | ❌ No work |
+| 5 | `approved + completed` gating (§2.6, P2 #6) | ⬜ **OPEN** | — *to do:* condition the GA4 tag in GTM on `status` / `payment_status`, or on the new `confirmed` flag. No plugin change | ◐ Half — the server-side read exists, the gate does not | Yes | Yes — **but gate the GTM tag, not the push.** Dropping the push hides pending/failed from reconciliation |
+| 11 | Staging `console.log` leak in `push()` (§5.3, *not in the audit*) | ⬜ **OPEN** | — *to do:* delete the `url.includes("staging")` branch and use the existing `?stms_debug=1` | 🔴 Missing | Yes — one branch to delete | Yes — also removes ES6 from an ES5 file |
+| 13 | Nonce fallback accepts an invalid nonce (§5.3, *not in the audit*) | ⬜ **OPEN** — doc only | — *to do:* a readme note. The behaviour itself is deliberate | ◐ Deliberate — nonces die on cached pages | n/a | No code change — document the residual risk |
+| 8 | `booking_start` before the first step view (§2.3, P1 #2) | ❌ **WON'T DO** | — deliberately unchanged | ✅ Duplicate in substance — `step_view / init / 0` already marks form boot | Yes — ~3 lines | ❌ No. Would double-fire one moment and destroy the "picked a slot" signal |
+| 9 | Tighten the `MutationObserver` onto `.bookly-step-active` (§2.6, P2 #8) | ❌ **WON'T DO** | — nothing exists to change | ⚪ N/A — there is no MutationObserver | No target to change | ❌ No. The AJAX-action approach supersedes it |
+| 10 | `/wp-json/daroon-bookly/v1/verify` endpoint (§2.6, P2 #6) | ❌ **WON'T DO** | — `stms_order_data` already does this job | ⚪ N/A | n/a | ❌ Build nothing; see row 5 for the real half |
+| 14 | Baseline SQL (P0) | 🟡 **OUT OF SCOPE** — ops | — run it in the DB | 🟡 Out of scope — read-only | n/a | Yes, safe to run |
+| 15 | GTM container rebuild (P3 #10–14) | 🟡 **OUT OF SCOPE** — GTM console | — build against `customer_id`, and add variables for `flow_id`, `subtotal`, `coupon_discount`, `user_id` | 🟡 Out of scope | n/a | Yes — row 2 has landed |
+| 16 | GA4 admin setup (P4 #15–17) | 🟡 **OUT OF SCOPE** — GA4 console | — register `customer_id`, and map `order_total` → `value` or revenue stays empty | 🟡 Out of scope | n/a | Yes |
+| 17 | QA matrix, rollout, reconciliation (P5 #18–22) | 🟡 **OUT OF SCOPE** — ops | — re-capture for #3; #6 is satisfied by the order-id fix | 🟡 Out of scope | n/a | Yes — ~~#21 blocked by row 4~~ unblocked, row 4 shipped |
 
 **Reading the table:** *Status* is the only column that says what is built. *Missing or duplicate?*
 answers the original question — whether the audit found something genuinely absent from the plugin
