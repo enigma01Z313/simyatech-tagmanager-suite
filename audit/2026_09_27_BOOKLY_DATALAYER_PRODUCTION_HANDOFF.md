@@ -37,13 +37,13 @@
 - **Why:** DataLayer alone does not prove the GTM tag maps revenue; unmapped `value` = silently wrong revenue reporting.
 - **Acceptance:** GTM Preview shows `value: 0.8, currency: "USD"` on the fired tag; GA4 DebugView shows the same.
 
-### 3. Normalize the `therapist` parameter format
+### 3. Normalize the `therapist` parameter format ✅
 
 - **Problem:** `booking_start` sends slug (`vida-yousefi-asl`), `booking_completed` sends display name (`Vida Yousefi Asl`). Same GA4 custom dimension → every therapist splits into two report rows.
 - **Fix:** Use one format in both events (slug recommended — stable, no casing/whitespace issues).
 - **Acceptance:** Both events emit the identical `therapist` string for the same booking.
 
-### 4. Fix `booking_start` firing order *(if quick — else defer)*
+### 4. Fix `booking_start` firing order *(if quick — else defer)* ✅
 
 - **Problem:** Fires after `init` (id 19) and `time` (id 20) step views; spec §5.2 requires it on `.bookly-form` detection, before the first step view.
 - **Impact:** Low — only matters if `booking_start` is used as entry step of a strictly-ordered GA4 funnel.

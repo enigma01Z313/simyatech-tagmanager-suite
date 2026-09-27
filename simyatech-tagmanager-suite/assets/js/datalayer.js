@@ -314,6 +314,14 @@
             return;
         }
 
+        // booking_start opens the funnel, so it cannot come out after the
+        // first step view. Form detection below normally sends it before any
+        // of this runs; this is the guarantee for the case where a step view
+        // is the first thing that happens - a form rendered by a script we
+        // never saw, or one that was already on the page before we loaded.
+        // The push itself is idempotent, so asking twice costs nothing.
+        pushBookingStart();
+
         // Bookly re-renders the step it is already on whenever that markup has
         // to change -- a cart line that failed to save, a declined card, a
         // gateway switch -- and each of those renders is another AJAX success.
@@ -478,6 +486,43 @@
     }
 
     // ------------------------------------------------------------ observers
+
+    /**
+     * booking_start belongs to the form appearing, not to the visitor doing
+     * something with it. It used to wait for a time slot to be clicked, which
+     * is two step views too late: init and time had both been reported by
+     * then, so anything reading it as the entry step of an ordered funnel saw
+     * the funnel begin in the middle.
+     *
+     * The form comes from a shortcode, so it is either in the markup at ready
+     * or inserted later by a script. Both are watched, and the observer drops
+     * off as soon as it has seen one. The slot click stays as a backstop and
+     * costs nothing, because the push happens once however often it is asked.
+     */
+    function watchForBooklyForm() {
+        if ($('.bookly-form').length) {
+            pushBookingStart();
+
+            return;
+        }
+
+        if (typeof MutationObserver !== 'function') {
+            return;
+        }
+
+        var observer = new MutationObserver(function () {
+            if (!$('.bookly-form').length) {
+                return;
+            }
+
+            observer.disconnect();
+            pushBookingStart();
+        });
+
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    $(watchForBooklyForm);
 
     /**
      * Bookly renders every step over admin-ajax, so its own requests are the

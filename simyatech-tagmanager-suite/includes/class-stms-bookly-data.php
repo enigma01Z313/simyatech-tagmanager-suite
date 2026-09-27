@@ -196,7 +196,7 @@ class STMS_Bookly_Data
             $first = $sessions[0];
 
             $services = array();
-            $therapists = array();
+            $therapist_slugs = array();
             $slot_starts = array();
             foreach ( $sessions as $session ) {
                 $title = ( $session['service_title'] !== null && $session['service_title'] !== '' )
@@ -205,8 +205,14 @@ class STMS_Bookly_Data
                 if ( $title !== '' && ! in_array( $title, $services, true ) ) {
                     $services[] = $title;
                 }
-                if ( $session['staff_name'] && ! in_array( $session['staff_name'], $therapists, true ) ) {
-                    $therapists[] = $session['staff_name'];
+                // Deduped on the slug, not the name: two spellings of one
+                // therapist would otherwise both survive and be sent as two.
+                if ( $session['staff_name'] ) {
+                    $slug = self::therapist_slug( $session['staff_name'] );
+
+                    if ( $slug !== '' && ! in_array( $slug, $therapist_slugs, true ) ) {
+                        $therapist_slugs[] = $slug;
+                    }
                 }
                 if ( $session['start_date'] ) {
                     $slot_starts[] = self::iso_datetime( $session['start_date'] );
@@ -236,7 +242,10 @@ class STMS_Bookly_Data
                 'session_value' => self::session_value( $order_total, $session_count ),
                 'currency' => self::currency(),
                 'service' => implode( ', ', $services ),
-                'therapist' => implode( ', ', $therapists ),
+                // Slugs, because booking_start reads the therapist off the URL
+                // and sends one. Two spellings of the same person land on the
+                // same GA4 dimension and split every therapist into two rows.
+                'therapist' => implode( ', ', $therapist_slugs ),
                 'slot_start' => implode( ', ', $slot_starts ),
                 'payment_method' => $payment ? self::normalize_gateway( $payment['type'] ) : '',
                 'coupon' => $payment ? self::payment_coupon( $payment ) : '',
@@ -560,5 +569,24 @@ class STMS_Bookly_Data
     private static function iso_datetime( $date )
     {
         return str_replace( ' ', 'T', trim( (string) $date ) );
+    }
+
+    /**
+     * "Vida Yousefi Asl" -> "vida-yousefi-asl"
+     *
+     * booking_start takes the therapist from the URL, which is already a slug;
+     * the saved order knows only the display name. Sending both to the same
+     * GA4 dimension splits one therapist across two report rows, so the name
+     * is reduced to the same shape here.
+     *
+     * sanitize_title is what the rest of the plugin slugifies with - see
+     * STMS_Language::slug_from_url - so the two agree on what a slug is.
+     *
+     * @param string $name
+     * @return string
+     */
+    private static function therapist_slug( $name )
+    {
+        return sanitize_title( (string) $name );
     }
 }
