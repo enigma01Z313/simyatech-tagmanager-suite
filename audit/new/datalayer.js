@@ -483,7 +483,20 @@
             var sessionValue = money(data.session_value);
             var currency = normalizeCurrency(data.currency);
             var transactionId = String(data.order_id || data.booking_id || '').replace(/^\s+|\s+$/g, '');
-            var confirmed = !!data.confirmed;
+            // The existing stms_order_data endpoint only returns confirmed
+            // orders (status=approved AND payment_status=completed), but it
+            // does not send a dedicated `confirmed` flag. Keep support for an
+            // explicit flag if the plugin adds one later; otherwise derive it
+            // from the server-verified statuses.
+            var confirmed;
+            if (typeof data.confirmed === 'boolean') {
+                confirmed = data.confirmed;
+            } else {
+                var serverStatus = String(data.status || '').toLowerCase();
+                var serverPaymentStatus = String(data.payment_status || '').toLowerCase();
+                confirmed = serverStatus === 'approved'
+                    && (serverPaymentStatus === 'completed' || serverPaymentStatus === 'paid');
+            }
 
             // A pending booking may later be confirmed on the same done page
             // (gateway return, retry, bank transfer). Allow that confirmed

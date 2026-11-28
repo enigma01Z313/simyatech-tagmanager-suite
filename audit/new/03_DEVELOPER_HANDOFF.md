@@ -1,6 +1,8 @@
 # Developer Handoff — Daroon Tracking v1.3.1
 
-**Goal:** Deploy the updated tracker, clear caches, and add refund/offline events safely.
+> **Scope update (2026-11-28):** Implement **§1, §2 and §5 now**. **§3 (refund), §4 (offline bookings) and §7 (CMP / Consent Mode) are deferred — do not implement them yet.** They are not required for channel/source-medium reporting or funnel conversion rate. **§6** only applies if you keep the Contact Form 7 lead tag; otherwise pause it. `init` is intentionally removed. See `12_SCOPE_CONFIRMATION.md`.
+
+**Goal:** Deploy the updated tracker and clear caches safely. Refund/offline/CMP work is deferred.
 
 ---
 
@@ -104,9 +106,9 @@ This does not affect `G-NT8THMV82G`. It only removes duplicate collection and a 
 
 ---
 
-## 3. Refund / cancellation events
+## 3. Refund / cancellation events — **DEFERRED, do not implement yet**
 
-You have two options. Use **Option B** for admin-side refunds, because the browser is not involved.
+> Not required for channel share or funnel CR. The tracker helper can stay dormant. Revisit only when net revenue reporting is needed.
 
 ### Option A — client-side (only if the refund happens on a page the customer visits)
 
@@ -227,7 +229,9 @@ Do not guess the hook signature. Check the Bookly plugin source or ask Bookly su
 
 ---
 
-## 4. Offline bookings (optional but valuable)
+## 4. Offline bookings — **DEFERRED, do not implement yet**
+
+> Not required for online funnel CR. Offline bookings cannot be attributed without the original `ga_client_id`; reconcile them in Bookly for now.
 
 If staff create bookings manually or take payment by phone, GA4 currently never sees them.
 
@@ -293,9 +297,9 @@ Do not weaken the CSP globally just for this. Use the narrowest allowlist that w
 
 ---
 
-## 7. Consent Mode v2 / CMP (separate task)
+## 7. Consent Mode v2 / CMP — **DEFERRED, separate project**
 
-Do this before running ads in the EU/UK, and ideally before scaling in Canada.
+> Not required for channel/CR reporting. Revisit before EU/UK ads or if legally required.
 
 Checklist for the developer:
 

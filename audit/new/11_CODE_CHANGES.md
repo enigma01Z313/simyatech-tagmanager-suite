@@ -157,6 +157,12 @@ This prevents purchases without a dedupe key.
 
 ---
 
+## 6a. `confirmed` without a server change
+
+The existing `stms_order_data` endpoint already returns data **only** when `status=approved` and `payment_status=completed`, and it does not send a separate `confirmed` field. The tracker therefore derives `confirmed` from those two server-verified statuses, and still honours `data.confirmed` if the plugin adds it later. No PHP change is required for this.
+
+---
+
 ## 7. Refund helper
 
 ```js
